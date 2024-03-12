@@ -1,114 +1,111 @@
 #include <iostream>
 #include <fstream>
-#include <string>
 #include <sstream>
-#include <vector>
-#include <unordered_set>
-#include <algorithm>
-#include <cctype>
+#include <string>
 #include <unordered_map>
+#include <vector>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
+
 using namespace std;
 
-const size_t BUFFER_SIZE = 4096; // Adjust the buffer size as needed
+void remove_and(string& lines) {
+    size_t start = 0;
+    size_t end = lines.find('\n');
 
-class Timer {
-public:
-    Timer() : start_time(chrono::high_resolution_clock::now()), running(true) {
-        // Start the timer thread
-        timer_thread = thread([this]() {
-            while (running) {
-                auto current_time = chrono::high_resolution_clock::now();
-                auto duration = chrono::duration_cast<chrono::milliseconds>(current_time - start_time);
-                cout << "\r\t\t\t\t\t\t\t\t\t\t\t\tElapsed time: " << duration.count() << " milliseconds." << flush;
-                this_thread::sleep_for(chrono::milliseconds(100)); // Update every 100 milliseconds
-            }
-        });
+    while (end != string::npos) {
+        if (end > start && lines[end - 1] == '&') {
+            lines.erase(end - 1, 1); // Remove '&' if it is the last character in the line
+        }
+        start = end + 1;
+        end = lines.find('\n', start);
     }
 
-    ~Timer() {
-        // Stop the timer thread
-        running = false;
-        if (timer_thread.joinable()) {
-            timer_thread.join();
-        }
-
-        // Print the final elapsed time
-        auto end_time = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
-        cout << "\rElapsed time: " << duration.count() << " milliseconds.";
-    }
-
-private:
-    chrono::high_resolution_clock::time_point start_time;
-    thread timer_thread;
-    bool running;
-};
-
-void processLine(const string& line, ofstream& output) {
-    size_t equalPos = line.find('=');
-
-    if (equalPos != string::npos) {
-        string prefix = line.substr(0, equalPos);
-        string remaining = line.substr(equalPos);
-
-        // Remove leading and trailing whitespaces from remaining
-        remaining.erase(0, remaining.find_first_not_of(" \t\n\r\f\v"));
-        remaining.erase(remaining.find_last_not_of(" \t\n\r\f\v") + 1);
-
-        vector<string> values;
-        istringstream iss(remaining);
-        string value;
-
-        string modifiedline;
-        modifiedline = prefix;
-        // Split remaining part by '&'
-        while (getline(iss, value, '&')) {
-            values.push_back(value);
-        }
-
-        // Write the modified lines to the output file
-        for (const auto& v : values) {
-            modifiedline = modifiedline + v+ '&';
-            output <<modifiedline << endl;
-        }
+    // Check the last line
+    if (!lines.empty() && lines.back() == '&') {
+        lines.pop_back(); // Remove '&' if it is the last character in the last line
     }
 }
 
-void writeok(const string& inputFilePath, const string& finalfile) {
-    ifstream inputFile(inputFilePath);
-    ofstream outputFile(finalfile, ios::out | ios::trunc);
+string transformURL(const string& url) {
+    unordered_map<string, string> params;
+    stringstream ss(url.substr(url.find('?') + 1)); // Extract parameters and values
 
-    if (!inputFile.is_open() || !outputFile.is_open()) {
-        cerr << "Error opening files." << endl;
+    string param;
+    while (getline(ss, param, '&')) {
+        string key = param.substr(0, param.find('='));
+        string value = param.substr(param.find('=') + 1);
+        value="ok";
+        params[key] = value;
+    }
+
+    // Sort parameters alphabetically
+    vector<pair<string, string>> sorted_params(params.begin(), params.end());
+    sort(sorted_params.begin(), sorted_params.end());
+
+    string base_url = url.substr(0, url.find('?') + 1);
+    string transformed_url;
+    string transformed_urls;
+
+    // Generate transformed URL
+    for (size_t i = 0; i < sorted_params.size(); ++i) {
+        transformed_url += sorted_params[i].first + "=" + sorted_params[i].second;
+        if (i < sorted_params.size() - 1) transformed_url += "&";
+        transformed_urls +=  base_url + transformed_url + "\n";
+        }
+    remove_and(transformed_urls);
+    return transformed_urls;
+}
+
+void transformURLsFromFile(const string& inputFilename, const string& outputFilename) {
+    ifstream inputFile(inputFilename);
+    ofstream outputFile(outputFilename);
+    
+    if (!inputFile.is_open()) {
+        cerr << "Error: Unable to open input file: " << inputFilename << endl;
+        return;
+    }
+    if (!outputFile.is_open()) {
+        cerr << "Error: Unable to open output file: " << outputFilename << endl;
         return;
     }
 
+    const int maxChunkSize = 1024; // Maximum chunk size in bytes
+    string buffer;
     string line;
 
-    while (getline(inputFile, line)) {
-        size_t lastEqualPos = line.find_last_of('=');
+    while (inputFile) {
+        int chunkSize = maxChunkSize;
 
-        if (lastEqualPos != string::npos) {
-            //replace whatever comes after the last "=" sign with "ok"
-            line.replace(lastEqualPos + 1, string::npos, "ok");
+        // Read a chunk from the input file
+        getline(inputFile, buffer);
+
+        while (!inputFile.eof() && buffer.size() < maxChunkSize) {
+            getline(inputFile, line);
+            buffer += '\n' + line; // Append line to buffer
+            
+            // Adjust chunk size if line is too long
+            if (line.size() > maxChunkSize) {
+                chunkSize = line.size();
+            }
         }
 
-        // Write the modified line to the output file
-        outputFile << line << endl;
+        // Process lines within the chunk
+        stringstream ss(buffer);
+        while (getline(ss, line)) {
+            outputFile << transformURL(line) ;
+        }
+
+        // Clear buffer for the next chunk
+        buffer.clear();
     }
 
     inputFile.close();
     outputFile.close();
-    // cout<<"\r\nDone preparing the parameters to the kxss tool."<<endl;
-}
 
-string trim(const string& str) {
-    auto start = str.find_first_not_of(" \t\r\n");
-    auto end = str.find_last_not_of(" \t\r\n");
-    return (start != string::npos && end != string::npos) ? str.substr(start, end - start + 1) : "";
+    cout << "Transformation completed successfully." << endl;
 }
 
 void deduplicateFile(const string& inputFilePath, const string& outputFilePath) {
@@ -161,64 +158,91 @@ void eraseFileContents(const string& filePath) {
     }
 }
 
-int main() {
-    
-    cout.rdbuf(cout.rdbuf());
-    cerr.rdbuf(cerr.rdbuf());
-    
-    string inputFilePath, finalfile, tempfile;
+void copyFile(const std::string& inputFilename, const std::string& outputFilename) {
+    std::ifstream inputFile(inputFilename, std::ios::binary);
+    std::ofstream outputFile(outputFilename, std::ios::binary);
 
-    //finalfile = "finalok.txt";
-
-    cout << "Enter the path to the input file: ";
-    getline(cin, inputFilePath);
-
-    cout << "Enter the path to the output file: ";
-    getline(cin, finalfile);
-   
-    tempfile =finalfile + "\\..\\temp.txt";
-
-    Timer timer;
-
-    ifstream inputFile(inputFilePath, ios::binary);
-    ofstream outputFile(finalfile, ios::binary);
-
-    if (!inputFile.is_open() || !outputFile.is_open()) {
-        cerr << "Error opening files." << endl;
-        return 1;
+    if (!inputFile.is_open()) {
+        std::cerr << "Error: Unable to open input file: " << inputFilename << std::endl;
+        return;
+    }
+    if (!outputFile.is_open()) {
+        std::cerr << "Error: Unable to open output file: " << outputFilename << std::endl;
+        return;
     }
 
-    char buffer[BUFFER_SIZE];
-    string remaining;
+    // Set the buffer size (e.g., 4 KB)
+    const size_t bufferSize = 4096;
+    std::vector<char> buffer(bufferSize);
 
-    while (inputFile.read(buffer, BUFFER_SIZE)) {
-        stringstream ss(remaining + string(buffer, inputFile.gcount()));
-        string line;
-
-        while (getline(ss, line)) {
-            processLine(line, outputFile);
-        }
-
-        remaining = line;
+    while (!inputFile.eof()) {
+        // Read a chunk of data from the input file
+        inputFile.read(buffer.data(), bufferSize);
+        
+        // Get the number of bytes read
+        size_t bytesRead = inputFile.gcount();
+        
+        // Write the data to the output file
+        outputFile.write(buffer.data(), bytesRead);
     }
 
-    processLine(remaining, outputFile);
-
+    // Close the files
     inputFile.close();
     outputFile.close();
 
-    writeok(finalfile,tempfile);
+    std::cout << "File copied successfully." << std::endl;
+}
 
-    //eraseFileContents(finalfile);
+class Timer {
+public:
+    Timer() : start_time(chrono::high_resolution_clock::now()), running(true) {
+        // Start the timer thread
+        timer_thread = thread([this]() {
+            while (running) {
+                auto current_time = chrono::high_resolution_clock::now();
+                auto duration = chrono::duration_cast<chrono::milliseconds>(current_time - start_time);
+                cout << "\rElapsed time: " << duration.count() << " milliseconds." << flush;
+                this_thread::sleep_for(chrono::milliseconds(100)); // Update every 100 milliseconds
+            }
+        });
+    }
 
-    deduplicateFile(tempfile,finalfile);
+    ~Timer() {
+        // Stop the timer thread
+        running = false;
+        if (timer_thread.joinable()) {
+            timer_thread.join();
+        }
 
-    eraseFileContents(tempfile); //just incase it does't get deleted in the next step
-    
+        // Print the final elapsed time
+        auto end_time = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+        cout << "\rElapsed time: " << duration.count() << " milliseconds." << endl;
+    }
+
+private:
+    chrono::high_resolution_clock::time_point start_time;
+    thread timer_thread;
+    bool running;
+};
+
+int main() {
+     string inputFilename, outputFilename;
+
+    cout << "Enter the path to the input file: ";
+    getline(cin, inputFilename);
+
+    cout << "Enter the path to the output file: ";
+    getline(cin, outputFilename);
+
+    Timer timer;
+    string tempfile= outputFilename + "/../temp.txt";
+    transformURLsFromFile(inputFilename, outputFilename);
+    deduplicateFile(outputFilename, tempfile );
+    copyFile(tempfile, outputFilename);
+    eraseFileContents(tempfile);
     remove(tempfile.c_str());
 
-    cout << "\r\nProcessing completed. Check'"<<finalfile<<"' for results." << endl;
-    cout <<"Done";
-    
     return 0;
 }
+
