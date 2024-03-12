@@ -240,6 +240,8 @@ def findxss(input_file_path,output_file_path,email=None,c=False):
         print(colorama.Fore.LIGHTGREEN_EX + "Findxss completed its run successfully." + colorama.Style.RESET_ALL)
         
     except Exception as e:
+        with open(process_number,'w') as pn :
+            pn.write("5")
         print("Error:", e)
 
 def main():
@@ -287,9 +289,6 @@ def main():
         # # Pass the generated file to does tool to get as much urls as possible without duplicates
         print("passing to the findxss tool...")
         findxss(does_out , args.output ,args.email,args.continues)
-        
-    with open (process_number,'w') as f:
-        f.write("0")
 
 if __name__ == "__main__":
     main()
